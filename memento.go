@@ -5,12 +5,11 @@
 package memento
 
 import (
+	"context"
 	"fmt"
 	"net/http"
-	"sync"
+	"net/url"
 	"time"
-
-	"github.com/wabarc/helper"
 )
 
 // Memento represents a Memento client.
@@ -18,46 +17,22 @@ type Memento struct {
 	Client *http.Client
 }
 
-func (m *Memento) Mementos(links []string) (map[string]string, error) {
-	collects, results := make(map[string]string), make(map[string]string)
-	for _, link := range links {
-		if helper.IsURL(link) {
-			collects[link] = link
-		}
-	}
-	if len(collects) == 0 {
-		return results, fmt.Errorf("No found URL")
-	}
-
+func (m *Memento) Mementos(_ context.Context, input *url.URL) (string, error) {
 	if m.Client == nil {
 		m.Client = &http.Client{Timeout: 60 * time.Second}
 	}
 
-	ch := make(chan string, len(collects))
-	defer close(ch)
-
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	for _, link := range collects {
-		wg.Add(1)
-		go func(link string) {
-			mu.Lock()
-			m.timegate(link, ch)
-			results[link] = <-ch
-			mu.Unlock()
-			wg.Done()
-		}(link)
-		time.Sleep(time.Second)
+	dst, err := m.timegate(input.String())
+	if err != nil {
+		return "", err
 	}
-	wg.Wait()
 
-	return results, nil
+	return dst, nil
 }
 
-func (m *Memento) timegate(uri string, ch chan<- string) {
+func (m *Memento) timegate(uri string) (string, error) {
 	if m.Client == nil {
-		ch <- "Client must not nil"
-		return
+		return "", fmt.Errorf("Client must not nil")
 	}
 	m.Client.CheckRedirect = noRedirect
 
@@ -66,14 +41,12 @@ func (m *Memento) timegate(uri string, ch chan<- string) {
 
 	resp, err := m.Client.Head(url)
 	if err != nil {
-		ch <- fmt.Sprintf("The requested URI: %s is not available in an archive.", url)
-		return
+		return "", fmt.Errorf("The requested URI: %s is not available in an archive.", url)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusFound {
-		ch <- resp.Status
-		return
+		return "", fmt.Errorf(resp.Status)
 	}
 
 	location := resp.Header.Get("Location")
@@ -81,7 +54,7 @@ func (m *Memento) timegate(uri string, ch chan<- string) {
 		location = "No Found"
 	}
 
-	ch <- location
+	return location, nil
 }
 
 func noRedirect(req *http.Request, via []*http.Request) error {

@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/wabarc/memento"
 )
@@ -34,8 +38,26 @@ func main() {
 	}
 
 	mem := &memento.Memento{}
-	archives, _ := mem.Mementos(args)
-	for orig, dest := range archives {
-		fmt.Println(orig, "=>", dest)
+	var wg sync.WaitGroup
+	for _, arg := range args {
+		wg.Add(1)
+		go func(arg string) {
+			defer wg.Done()
+			in, err := url.Parse(arg)
+			if err != nil {
+				fmt.Println(arg, "=>", fmt.Sprint(err))
+				return
+			}
+
+			dst, err := mem.Mementos(context.TODO(), in)
+			if err != nil {
+				fmt.Println(arg, "=>", fmt.Sprint(err))
+				return
+			}
+			fmt.Println(arg, "=>", dst)
+		}(arg)
+		// nice for memento service
+		time.Sleep(time.Second)
 	}
+	wg.Wait()
 }
